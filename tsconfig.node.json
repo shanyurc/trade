@@ -1,17 +1,28 @@
 {
   "extends": "@tsconfig/node18/tsconfig.json",
-  "include": [
-    "vite.config.*",
-    "vitest.config.*",
-    "cypress.config.*",
-    "nightwatch.conf.*",
-    "playwright.config.*"
-  ],
+  // "include": [
+  //   "vite.config.*",
+  //   "vitest.config.*",
+  //   "cypress.config.*",
+  //   "nightwatch.conf.*",
+  //   "playwright.config.*"
+  // ],
+  // "compilerOptions": {
+  //   "composite": true,
+  //   "noEmit": true,
+  //   "module": "ESNext",
+  //   "moduleResolution": "Bundler",
+  //   "types": ["node"],
+  //   "outDir": "./dist"
+  // }
+  // ,
   "compilerOptions": {
-    "composite": true,
-    "noEmit": true,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "types": ["node"]
-  }
+    "target": "ESNext",
+    "module": "Node16",
+    "outDir": "./dist",
+    "strict": true,
+    "esModuleInterop": true
+  },
+  "include": ["src/electron/*.ts"],
+  "exclude": ["node_modules"]
 }

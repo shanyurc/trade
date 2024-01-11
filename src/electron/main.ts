@@ -8,9 +8,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 app.commandLine.appendSwitch('lang', 'zh-CN')
 
-const isDev = !app.isPackaged
-
-// import.meta.env.MODE === 'development' ? true : false;
+//es6判断是否开发环境
+const isDev = import.meta.env.MODE === 'development' ? true : false;
 
 function createWindow() {
     // Create the browser window.
@@ -18,7 +17,7 @@ function createWindow() {
         width: 800,
         height: 600,
         webPreferences: {
-            preload: path.join(__dirname, 'preload.mjs')
+            preload: path.join(__dirname, 'preload.ts')
         },
     });
 
@@ -35,9 +34,7 @@ function createWindow() {
     }
 }
 
-// 当 Electron 完成时，将调用此方法
-// 初始化并准备创建浏览器窗口。
-// 某些 API 只能在发生此事件后使用。
+// 当 Electron 完成时，将调用此方法初始化并准备创建浏览器窗口。某些 API 只能在发生此事件后使用。
 app.whenReady().then(() => {
     createWindow()
     app.on('activate', function () {
@@ -51,7 +48,7 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
-    //   if (process.platform !== 'darwin') {
-    app.quit();
-    //   }
+    // if (process.platform !== 'darwin') {
+        app.quit();
+    // }
 });
