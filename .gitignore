@@ -49,4 +49,4 @@ ENV/
 # OS specific
 .DS_Store
 Thumbs.db
-.vscode/settings.json
+.vscode
