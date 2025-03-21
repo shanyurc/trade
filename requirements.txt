@@ -1,7 +1,10 @@
-PyQt6==6.6.1
+PySide6==6.6.1
 pandas==2.2.0
 requests==2.31.0
 python-dotenv==1.0.1
 tushare==1.2.89
 O365==2.0.26
-SQLAlchemy==2.0.27 
+SQLAlchemy==2.0.27
+openpyxl==3.1.2
+webdavclient3==3.14.6
+PyQt-Fluent-Widgets==1.5.2 

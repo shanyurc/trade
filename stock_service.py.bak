@@ -143,7 +143,7 @@ class StockService:
                             'current_price': price,
                             'price_precision': price_precision
                         }
-            except Exception as e:
+        except Exception as e:
                 print(f"腾讯API获取股票信息失败: {e}")
                 
         return result
@@ -249,27 +249,60 @@ class StockService:
                                 price_str = str(price_val)
                                 
                                 # 确定价格精度
-                                price_precision = len(price_str.split('.')[1]) if '.' in price_str else 0
-                                return price_val, price_precision
-                        except (ValueError, KeyError, IndexError) as e:
+                                if '.' in price_str:
+                                    price_precision = len(price_str.split('.')[1])
+                                else:
+                                    price_precision = 0
+                                    
+                                price = float(price_val)
+                                if price > 0:
+                                    return price, price_precision
+                        except (ValueError, KeyError, json.JSONDecodeError) as e:
                             print(f"东方财富数据解析失败: {e}")
             except Exception as e:
-                print(f"东方财富API获取实时价格失败: {e}")
-                
-        return None, price_precision
+                print(f"东方财富获取实时价格失败: {e}")
         
+        # 尝试使用Tushare (作为最后选项，因为不是实时数据)
+        if price is None and self.use_tushare:
+            try:
+                df = self.pro.daily(ts_code=stock_code, 
+                                  start_date=datetime.now().strftime('%Y%m%d'),
+                                  end_date=datetime.now().strftime('%Y%m%d'))
+                if not df.empty:
+                    try:
+                        price_val = df.iloc[0]['close']
+                        price_str = str(price_val)
+                        
+                        # 确定价格精度
+                        if '.' in price_str:
+                            price_precision = len(price_str.split('.')[1])
+                        else:
+                            price_precision = 0
+                            
+                        price = float(price_val)
+                        if price > 0:
+                            return price, price_precision
+                    except (ValueError, KeyError, IndexError) as e:
+                        print(f"Tushare返回的价格解析失败: {e}")
+            except Exception as e:
+                print(f"Tushare获取实时价格失败: {e}")
+            
+        return price, price_precision
+            
     def check_price_targets(self, trade):
-        """检查股票价格是否达到目标"""
+        """检查是否达到目标价格"""
         current_price, _ = self.get_realtime_price(trade.stock_code)
-        if current_price:
-            if current_price >= trade.sell_target:
-                return "卖出"
-            if current_price <= trade.buy_target:
-                return "买入"
-        return None
-
+        if current_price is None:
+            return None
+            
+        if current_price >= trade.sell_target:
+            return "SELL"
+        elif current_price <= trade.buy_target:
+            return "BUY"
+        return None 
+        
     def get_historical_data(self, stock_code, days=30):
-        """获取历史数据"""
+        """获取历史价格数据"""
         stock_code = self.format_stock_code(stock_code)
         
         # 尝试使用Tushare
@@ -279,17 +312,17 @@ class StockService:
                 start_date = end_date - timedelta(days=days)
                 
                 df = self.pro.daily(ts_code=stock_code, 
-                                  start_date=start_date.strftime('%Y%m%d'), 
-                                  end_date=end_date.strftime('%Y%m%d'))
+                                start_date=start_date.strftime('%Y%m%d'),
+                                end_date=end_date.strftime('%Y%m%d'))
                 
                 if not df.empty:
-                    # 按日期排序
+                    # 按时间正序排列
                     df = df.sort_values('trade_date')
                     return df[['trade_date', 'open', 'high', 'low', 'close', 'vol']]
             except Exception as e:
                 print(f"Tushare获取历史数据失败: {e}")
-        
-        # 尝试东方财富接口
+                
+        # 尝试东方财富数据
         try:
             simple_code = stock_code.split('.')[0]
             market = 0 if stock_code.endswith('.SZ') else 1
@@ -315,11 +348,11 @@ class StockService:
         except Exception as e:
             print(f"东方财富获取历史数据失败: {e}")
         
-        # 新浪API: 日线数据
+        # 备用API: 使用新浪历史数据接口
         try:
             market = 'sh' if stock_code.endswith('.SH') else 'sz'
             simple_code = stock_code.split('.')[0]
-            
+                
             url = f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={market}{simple_code}&scale=240&ma=no&datalen={days}"
             response = requests.get(url)
             
@@ -335,51 +368,46 @@ class StockService:
                         'close': 'close',
                         'volume': 'vol'
                     }, inplace=True)
-                    # 确保数值类型
-                    for col in ['open', 'high', 'low', 'close']:
-                        df[col] = pd.to_numeric(df[col])
-                    df['vol'] = pd.to_numeric(df['vol'])
                     return df
         except Exception as e:
             print(f"新浪API获取历史数据失败: {e}")
-        
-        # 腾讯API: 获取历史日K
+            
+        # 腾讯历史数据接口
         try:
             market = 'sh' if stock_code.endswith('.SH') else 'sz'
             simple_code = stock_code.split('.')[0]
             
-            today = datetime.now().strftime('%Y-%m-%d')
-            start_day = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-            
+            today = datetime.now().strftime('%Y%m%d')
+            start_day = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
             url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={market}{simple_code},day,{start_day},{today},60,qfq"
-            response = requests.get(url)
             
+            response = requests.get(url)
             if response.status_code == 200:
                 data = response.json()
-                if data['code'] == 0 and data['data']:
-                    kline_key = 'qfqday' if 'qfqday' in data['data'][f"{market}{simple_code}"] else 'day'
-                    klines = data['data'][f"{market}{simple_code}"][kline_key]
-                    result = []
-                    for k in klines:
-                        result.append({
-                            'trade_date': k[0],
-                            'open': float(k[1]),
-                            'close': float(k[2]),
-                            'high': float(k[3]),
-                            'low': float(k[4]),
-                            'vol': float(k[5])
-                        })
-                    return pd.DataFrame(result)
+                kline_key = 'qfqday' if 'qfqday' in data['data'][f"{market}{simple_code}"] else 'day'
+                klines = data['data'][f"{market}{simple_code}"][kline_key]
+                
+                result = []
+                for k in klines:
+                    result.append({
+                        'trade_date': k[0],
+                        'open': float(k[1]),
+                        'close': float(k[2]),
+                        'high': float(k[3]),
+                        'low': float(k[4]),
+                        'vol': float(k[5])
+                    })
+                return pd.DataFrame(result)
         except Exception as e:
             print(f"腾讯API获取历史数据失败: {e}")
             
         return None
-        
+            
     def search_stocks(self, keyword):
         """搜索股票"""
-        results = []
+        result = []
         
-        # 使用东方财富搜索接口
+        # 首先尝试使用东方财富搜索接口
         try:
             url = f"https://searchapi.eastmoney.com/api/suggest/get?input={keyword}&type=14&token=D43BF722C8E33BDC906FB84D85E326E8"
             response = requests.get(url)
@@ -392,77 +420,101 @@ class StockService:
                         if not code:
                             continue
                             
-                        # 处理深市和沪市代码
+                        # 确定市场
+                        ts_code = ''
                         if code.startswith('6'):
                             ts_code = f"{code}.SH"
                         elif code.startswith('0') or code.startswith('3'):
                             ts_code = f"{code}.SZ"
                         else:
-                            # 跳过非常规股票代码
-                            continue
+                            ts_code = f"{code}.SZ"  # 默认
                             
-                        # 创建股票数据记录
+                        # 获取股票名称，确保有值
+                        name = item.get('Name', '未知')
+                        if not name:
+                            name = '未知股票'
+                                
+                        # 组装标准格式的股票数据
                         stock_data = {
                             'ts_code': ts_code,
                             'symbol': code,
-                            'name': item.get('Name', ''),
+                            'name': name,
                             'area': '',
                             'industry': item.get('QuotationCodeTableMarket', {}).get('Name', ''),
                             'list_date': ''
                         }
                         
-                        # 尝试获取当前价格
+                        # 尝试获取实时价格
                         try:
                             current_price, price_precision = self.get_realtime_price(ts_code)
                             if current_price:
                                 stock_data['current_price'] = current_price
                                 stock_data['price_precision'] = price_precision
                         except Exception as e:
-                            print(f"获取{ts_code}价格错误: {e}")
-                            
-                        results.append(stock_data)
+                            print(f"获取股票{ts_code}价格失败: {e}")
+                            stock_data['current_price'] = 0
+                            stock_data['price_precision'] = 0
+                                
+                        result.append(stock_data)
         except Exception as e:
-            print(f"搜索股票失败: {e}")
-            
-        # 如果东方财富没有结果，尝试使用新浪API
-        if not results:
+            print(f"东方财富搜索失败: {e}")
+        
+        # 如果东方财富没有结果，尝试使用Tushare
+        if not result and self.use_tushare:
             try:
-                # 对于数字，假设是股票代码
-                if keyword.isdigit():
-                    # 尝试沪市和深市
-                    for market in ['sh', 'sz']:
-                        url = f"http://hq.sinajs.cn/list={market}{keyword}"
-                        headers = {"Referer": "https://finance.sina.com.cn"}
-                        response = requests.get(url, headers=headers)
-                        
-                        if response.status_code == 200:
-                            content = response.text
-                            matches = re.findall(r'hq_str_(?:\w+)=\"([^\"]+)\"', content)
-                            if matches and len(matches[0].split(',')) > 1:
-                                data = matches[0].split(',')
-                                name = data[0]
-                                if name:  # 如果名称不为空，说明找到了股票
-                                    ts_code = f"{keyword}.{'SH' if market == 'sh' else 'SZ'}"
-                                    current_price, price_precision = self.get_realtime_price(ts_code)
-                                    
-                                    record = {
-                                        'ts_code': ts_code,
-                                        'symbol': keyword,
-                                        'name': name,
-                                        'area': '',
-                                        'industry': '',
-                                        'list_date': ''
-                                    }
-                                    if current_price:
-                                        record['current_price'] = current_price
-                                        record['price_precision'] = price_precision
-                                    
-                                    results.append(record)
-                # 对于非数字，假设是股票名称
-                else:
-                    # 这里需要更复杂的逻辑来通过名称查找，暂不实现
-                    pass
+                df = self.pro.stock_basic(exchange='', list_status='L', 
+                                        fields='ts_code,symbol,name,area,industry,list_date')
+                filtered = df[df['name'].str.contains(keyword) | df['symbol'].str.contains(keyword)]
+                if not filtered.empty:
+                    records = filtered.to_dict('records')
+                    # 添加current_price字段以保持一致的数据结构
+                    for record in records:
+                        try:
+                            current_price, price_precision = self.get_realtime_price(record['ts_code'])
+                            record['current_price'] = current_price if current_price else 0
+                            record['price_precision'] = price_precision
+                        except Exception:
+                            record['current_price'] = 0
+                            record['price_precision'] = 0
+                    result.extend(records)
             except Exception as e:
-                print(f"通过新浪API搜索股票失败: {e}")
-                    
-        return results 
+                print(f"Tushare搜索股票失败: {e}")
+        
+        # 如果结果为空，尝试直接构造可能的结果（这对纯数字的股票代码搜索有效）
+        if not result and keyword.isdigit() and len(keyword) >= 4:
+            # 假设用户输入的是股票代码
+            code = keyword.zfill(6)  # 补齐6位
+            
+            # 尝试获取股票信息来验证这个代码是否有效
+            stock_info = self.get_stock_info(code)
+            if stock_info:
+                # 确保stock_info包含所有必要的键
+                if 'current_price' not in stock_info:
+                    try:
+                        current_price, price_precision = self.get_realtime_price(stock_info.get('ts_code', code))
+                        stock_info['current_price'] = current_price if current_price else 0
+                        stock_info['price_precision'] = price_precision
+                    except Exception:
+                        stock_info['current_price'] = 0
+                        stock_info['price_precision'] = 0
+                        
+                result.append(stock_info)
+        
+        # 确保所有结果有标准字段
+        standardized_result = []
+        for item in result:
+            if item:  # 排除None项
+                # 创建标准化结构
+                standardized_item = {
+                    'ts_code': item.get('ts_code', ''),
+                    'symbol': item.get('symbol', ''),
+                    'name': item.get('name', '未知'),
+                    'area': item.get('area', ''),
+                    'industry': item.get('industry', ''),
+                    'list_date': item.get('list_date', ''),
+                    'current_price': item.get('current_price', 0),
+                    'price_precision': item.get('price_precision', 0)
+                }
+                standardized_result.append(standardized_item)
+                
+        return standardized_result 
