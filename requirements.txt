@@ -1,0 +1,7 @@
+PyQt6==6.6.1
+pandas==2.2.0
+requests==2.31.0
+python-dotenv==1.0.1
+tushare==1.2.89
+O365==2.0.26
+SQLAlchemy==2.0.27 
